@@ -50,10 +50,22 @@ export class Player {
   }
 
   lock() {
+    if (document.pointerLockElement === this.dom) return;
     try {
-      const p = this.dom.requestPointerLock?.();
-      if (p && p.catch) p.catch(() => {});
-    } catch {}
+      // unadjustedMovement gives raw mouse deltas where supported; fall back to a plain request
+      const p = this.dom.requestPointerLock?.({ unadjustedMovement: true });
+      if (p && p.catch)
+        p.catch(() => {
+          try {
+            const p2 = this.dom.requestPointerLock();
+            if (p2 && p2.catch) p2.catch(() => {});
+          } catch {}
+        });
+    } catch {
+      try {
+        this.dom.requestPointerLock();
+      } catch {}
+    }
   }
   unlock() {
     if (document.pointerLockElement) document.exitPointerLock();

@@ -718,6 +718,59 @@ export const G = {
     };
   },
 
+  highlightsPoster(ctx, w, h) {
+    blueGradient(ctx, w, h);
+    networkPattern(ctx, w, h, 'rgba(255,255,255,0.08)', 70);
+    drawWordmark(ctx, w * 0.04, h * 0.07, h * 0.07, '#fff');
+    ctx.fillStyle = '#9fb0ff';
+    ctx.font = `700 ${h * 0.045}px ${FONT}`;
+    ctx.fillText('HIGHLIGHTS', w * 0.04, h * 0.27);
+    ctx.fillStyle = '#fff';
+    ctx.font = `800 ${h * 0.11}px ${FONT}`;
+    ctx.fillText('Only the parts', w * 0.04, h * 0.4);
+    ctx.fillText('that matter.', w * 0.04, h * 0.52);
+    ctx.font = `500 ${h * 0.04}px ${FONT}`;
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    wrapText(ctx, 'A specialized model extracts the most relevant excerpts from every page, so your agent reads less and knows more.', w * 0.04, h * 0.62, w * 0.5, h * 0.055);
+    // big stat
+    ctx.fillStyle = '#fff';
+    ctx.font = `900 ${h * 0.16}px ${FONT}`;
+    ctx.fillText('90%', w * 0.04, h * 0.9);
+    const statW = ctx.measureText('90%').width;
+    ctx.font = `600 ${h * 0.045}px ${FONT}`;
+    ctx.fillText('token reduction', w * 0.04 + statW + h * 0.03, h * 0.88);
+    // right: demo schedule card
+    const cx = w * 0.6, cy = h * 0.1, cw = w * 0.36, ch = h * 0.8;
+    ctx.fillStyle = '#fff';
+    roundRect(ctx, cx, cy, cw, ch, 18);
+    ctx.fill();
+    ctx.fillStyle = '#ff4d6d';
+    ctx.beginPath();
+    ctx.arc(cx + cw * 0.08, cy + ch * 0.1, h * 0.014, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = INK;
+    ctx.font = `800 ${h * 0.05}px ${FONT}`;
+    ctx.fillText('Live demos today', cx + cw * 0.13, cy + ch * 0.12);
+    ctx.fillStyle = '#5b6280';
+    ctx.font = `500 ${h * 0.03}px ${FONT}`;
+    ctx.fillText('At the demo desks across the café →', cx + cw * 0.08, cy + ch * 0.2);
+    const rows = [['Search API', 'Every :00 and :30', 'Highlights, filters, contents'], ['Websets', 'Every :15 and :45', 'Find, verify, enrich'], ['Ask the team', 'All day', 'Bring your agent’s hardest query']];
+    rows.forEach(([a, b, c], i) => {
+      const y = cy + ch * (0.27 + i * 0.235);
+      ctx.fillStyle = BLUE;
+      roundRect(ctx, cx + cw * 0.08, y, cw * 0.84, ch * 0.205, 12);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = `800 ${h * 0.042}px ${FONT}`;
+      ctx.fillText(a, cx + cw * 0.13, y + ch * 0.065);
+      ctx.font = `600 ${h * 0.03}px ${FONT}`;
+      ctx.fillText(b, cx + cw * 0.13, y + ch * 0.12);
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      ctx.font = `500 ${h * 0.028}px ${FONT}`;
+      ctx.fillText(c, cx + cw * 0.13, y + ch * 0.17);
+    });
+  },
+
   // ---------------- Outdoor ----------------
   drinkMenu(drinks) {
     return (ctx, w, h) => {

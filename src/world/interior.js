@@ -323,6 +323,9 @@ function buildCafe() {
   scene.add(tent);
   addInteractable({ id: 'cookies', pos: v3(-16.2, 1, -4.4), radius: 2.6, label: 'Grab an Exa cookie & see the café menu', action: act('cafe') });
 
+  // Poster on the partition facing the café counters (was blank)
+  wallGraphic(6, 3.2, G.highlightsPoster, -11 - 0.14, 2.2, -5.6, '-x', { emissive: 0.18, px: 320, max: 2048 });
+
   // Drinks fridge
   const fridge = new THREE.Group();
   fridge.add(box(1.3, 2.1, 0.7, M.white, 0, 1.05, 0));

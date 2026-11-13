@@ -9,7 +9,10 @@ let player;
 let modalEl = null;
 let modalOnClose = null;
 let started = false;
-let dragMode = false;
+// Drag-to-look is only the permanent mode when pointer lock doesn't exist at all.
+// A refused lock request (e.g. clicking within ~1s of pressing Esc) is temporary:
+// the next click on the scene simply tries again.
+const dragMode = !('requestPointerLock' in HTMLElement.prototype);
 let tourActive = false;
 const cb = {};
 
@@ -39,6 +42,7 @@ export function initHUD(opts) {
         h('button.hbtn', { onclick: () => openTeleport(), title: 'Teleport (T)' }, 'Teleport', h('kbd', {}, 'T')),
         h('button.hbtn', { onclick: () => cb.startTour?.(), title: 'Guided tour (G)' }, 'Tour', h('kbd', {}, 'G')),
         h('button.hbtn#mute', { onclick: () => toggleMute(), title: 'Sound (M)' }, isMuted() ? 'Sound off' : 'Sound on'),
+        h('button.hbtn', { onclick: () => confirmReset(), title: 'Start over from scratch' }, 'Reset'),
         h('button.hbtn', { onclick: () => openHelp(), title: 'Help (H)' }, '?'),
       ),
     ),
@@ -84,12 +88,14 @@ export function initHUD(opts) {
     if (tourActive) return cb.stopTour?.();
     if (!dragMode && !player.locked) player.lock();
   });
+  if (dragMode) document.body.classList.add('drag-mode');
   document.addEventListener('pointerlockerror', () => {
-    dragMode = true;
-    document.body.classList.add('drag-mode');
+    // the browser refused this attempt; leave the "click to look around" hint up so the next click retries
+    document.body.classList.remove('locked');
   });
   document.addEventListener('pointerlockchange', () => {
     document.body.classList.toggle('locked', player.locked);
+    if (player.locked) player.enabled = true;
     if (!player.locked && started && !modalEl && !dragMode && !tourActive) showPause();
     if (player.locked) hidePause();
   });
@@ -154,6 +160,7 @@ function showPause() {
       h('button.btn.ghost', { onclick: () => { hidePause(); openTeleport(); } }, 'Teleport to a station'),
       h('button.btn.ghost', { onclick: () => { hidePause(); cb.startTour?.(); } }, 'Guided tour'),
       h('button.btn.ghost', { onclick: () => { hidePause(); openHelp(); } }, 'About this concept'),
+      h('button.btn.ghost.danger', { onclick: () => { hidePause(); confirmReset(); } }, 'Reset game'),
     ),
   );
   ui.append(pauseEl);
@@ -378,8 +385,29 @@ export function openHelp() {
     <h4>Controls</h4>
     <p class="controls-line"><kbd>WASD</kbd> move · <kbd>Mouse</kbd> look · <kbd>Shift</kbd> run · <kbd>E</kbd> interact · <kbd>T</kbd> teleport · <kbd>G</kbd> guided tour · <kbd>M</kbd> sound · <kbd>Esc</kbd> pause</p>
   ` });
-  body.append(h('button.btn.ghost.small', { onclick: () => { if (confirm('Reset your badge, bag, checklist and scores?')) { resetState(); cb.onReset?.(); toast('Progress reset'); } } }, 'Reset my progress'));
+  body.append(h('button.btn.ghost.small.danger', { onclick: () => confirmReset() }, 'Reset game'));
   openModal({ title: 'About this concept', kicker: `${EVENT.name} ${EVENT.year}`, body, wide: true });
+}
+
+// ------------------------------------------------------------------ full reset
+export function confirmReset() {
+  const body = h('div.reset', {},
+    h('p.lead', {}, 'Start the summit from scratch? This clears your badge and name, empties your bag, unchecks the checklist, and removes your reaction-game scores, hoodie win and goat photos.'),
+    h('div.reset-actions', {},
+      h('button.btn.ghost', { onclick: () => closeModal() }, 'Cancel'),
+      h('button.btn.primary.danger', { onclick: () => fullReset() }, 'Reset everything'),
+    ),
+  );
+  openModal({ title: 'Reset game', kicker: 'Start over', body });
+}
+
+function fullReset() {
+  resetState();
+  try {
+    localStorage.removeItem('exa-summit-state-v1');
+  } catch {}
+  // reload so every station, screen and print in the 3D world starts fresh
+  location.reload();
 }
 
 // ------------------------------------------------------------------ tour caption
