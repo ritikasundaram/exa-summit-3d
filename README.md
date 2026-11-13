@@ -1,5 +1,7 @@
 # Exa Summit at Shack15: 3D concept
 
+**Live:** https://exa-summit-3d.vercel.app
+
 A walkable, game-style 3D concept for an Exa conference at **Shack15** (Ferry Building, San Francisco), built with Three.js + Vite. Everything is procedural: no 3D model or image assets to load.
 
 ## Run locally
@@ -13,13 +15,13 @@ Open the URL Vite prints (default http://localhost:5173).
 
 ## Deploy to Vercel
 
-Push this folder to a GitHub repo and import it in Vercel (framework: **Vite**, build `npm run build`, output `dist`), or from this folder:
+This repo is connected to the Vercel project `exa-summit-3d`: every push to `main` deploys to production automatically. To deploy manually from this folder:
 
 ```bash
-npx vercel
+vercel deploy --prod
 ```
 
-`vercel.json` already sets the framework, build command and output directory.
+`vercel.json` sets the framework (Vite), build command and output directory.
 
 ## What's in the space
 
