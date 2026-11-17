@@ -10,6 +10,7 @@ const defaults = () => ({
   wonHoodie: false,
   goatsPetted: 0,
   photos: 0,
+  duskParty: true, // the terrace turns to dusk for the after party
 });
 
 let data = defaults();

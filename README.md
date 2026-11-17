@@ -39,6 +39,7 @@ vercel deploy --prod
 **Outside: after party on the Bay Terrace**
 - **Goat petting zoo** with a little blue barn (press E near a goat).
 - **Goat photo booth**: renders a real photo from a booth camera and prints it into an Exa-shaped photo holder (downloadable PNG).
+- **The Nearest-Neighbour Bar**: a kiosk beside the bar. Type your mood and it finds the closest cocktail by cosine similarity in a small mood space (36 drinks, zero-proof on request), with a yes / no on screen: yes pours it, no moves to the next-closest. The embedding is hand-built in `src/data/cocktails.js` as a concept stand-in; no model or API is called.
 - **The Exa-ited! bar**: Exa-ited!, Exa-ctly Right, Deep Research, Neural Negroni, The G.O.A.T., and zero-proof drinks.
 - DJ, string lights, glowing Exa sculpture, and the Bay Bridge with shimmering Bay Lights.
 
@@ -46,12 +47,25 @@ vercel deploy --prod
 
 `WASD` move · mouse look (click to capture) · `Shift` run · `E` interact · `T` teleport · `G` guided tour · `M` sound · `Esc` pause. On touch devices: left thumb moves, right thumb looks, tap the prompt to interact.
 
+## Graphics
+
+The look is physically based but still fully procedural (no model or image downloads):
+
+- **Shack15 shell**: the Ferry Building's arched steel-and-glass roof (lattice ribs, tie rods, central skylight), arched bay windows, lunette and fan windows, painted brick, pale oak floor, timber slat partitions.
+- **Light**: a late-afternoon western sun with shadows baked once at load (all casters are static, so shadows cost nothing per frame), sky-based image lighting outdoors and a captured light probe indoors.
+- **Day to dusk**: the conference runs in afternoon light; stepping out onto the Bay Terrace fades to dusk for the after party (sky, stars, string lights, Bay Lights, lit skyline), and walking back in returns to afternoon. Turn it off with **Dusk on the terrace** in the pause menu (`Esc`); the choice is saved in the browser.
+- **Post-processing** (`src/render/post.js`): HDR render target with MSAA, ambient occlusion, bloom, AgX tone mapping, light grade, vignette and grain.
+- **Performance**: static geometry is merged per material, animated people are collapsed to one mesh each, and a frame-rate governor scales the internal resolution (then the quality tier) to hold about 55 fps.
+
+URL options: `?q=low|medium|high` pins a quality tier (touch devices start on `low`, everything else on `high`), `?gov=0` turns the frame-rate governor off.
+
 ## Customizing
 
 - Event name, year and latency target: `src/config.js`
 - Agenda (also powers the MCP demo) and customer quotes: `src/data/agenda.js`. Guest speakers are a *proposed* lineup taken from exa.ai/customers; talks are not confirmed.
-- Drink menu: `src/data/drinks.js`
+- Drink menu: `src/data/drinks.js`; mood-matched cocktails and the mood vocabulary: `src/data/cocktails.js`
 - All printed graphics (banners, posters, backdrops): `src/world/graphics.js`
+- Sun direction and sky colours: `src/world/sky.js`; surface materials and textures: `src/world/mat.js`, `src/world/tex.js`
 - Layout of each room: `src/world/interior.js`, outdoor party: `src/world/outdoor.js`
 
 Progress (badge, bag, checklist, scores) is stored in the browser's localStorage; reset it from the `?` help panel.

@@ -6,8 +6,13 @@ export const FONT = 'Inter, Helvetica, Arial, sans-serif';
 export const MONO = '"JetBrains Mono", Menlo, monospace';
 
 let maxAniso = 4;
+const registry = new Set();
 export function setMaxAnisotropy(n) {
   maxAniso = n;
+  for (const t of registry) {
+    t.anisotropy = n;
+    t.needsUpdate = true;
+  }
 }
 
 export function canvasTexture(w, h, draw, { repeat, srgb = true } = {}) {
@@ -19,6 +24,7 @@ export function canvasTexture(w, h, draw, { repeat, srgb = true } = {}) {
   const t = new THREE.CanvasTexture(c);
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = maxAniso;
+  registry.add(t);
   if (repeat) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
@@ -175,6 +181,359 @@ export function grassTexture(repeat) {
     },
     { repeat },
   );
+}
+
+// ---------- PBR surface sets (albedo + normal + roughness, all procedural) ----------
+
+// Deterministic RNG so surfaces look the same on every load.
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return [c, c.getContext('2d', { willReadFrequently: true })];
+}
+
+function dataTexture(canvas, { srgb = false, repeat } = {}) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = maxAniso;
+  registry.add(t);
+  if (repeat) t.repeat.set(repeat[0], repeat[1]);
+  return t;
+}
+
+/** Tangent-space normal map from a greyscale height canvas (tiling Sobel). */
+function normalFromHeight(heightCanvas, strength = 2) {
+  const w = heightCanvas.width;
+  const h = heightCanvas.height;
+  const src = heightCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const [out, octx] = makeCanvas(w, h);
+  const img = octx.createImageData(w, h);
+  const d = img.data;
+  const H = (x, y) => src[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (H(x + 1, y) - H(x - 1, y)) * strength;
+      const dy = (H(x, y + 1) - H(x, y - 1)) * strength;
+      const il = 1 / Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      d[i] = (-dx * il * 0.5 + 0.5) * 255;
+      d[i + 1] = (dy * il * 0.5 + 0.5) * 255;
+      d[i + 2] = (il * 0.5 + 0.5) * 255;
+      d[i + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  return out;
+}
+
+function speckle(ctx, w, h, r, n, alpha, light = 255, dark = 0, size = 2) {
+  for (let i = 0; i < n; i++) {
+    const v = r() > 0.5 ? light : dark;
+    ctx.fillStyle = `rgba(${v},${v},${v},${r() * alpha})`;
+    ctx.fillRect(r() * w, r() * h, 1 + r() * size, 1 + r() * size);
+  }
+}
+
+/** Soft low-frequency blotches (tiling) for plaster, stone and stains. */
+function blotches(ctx, w, h, r, n, radius, alpha, light = true) {
+  for (let i = 0; i < n; i++) {
+    const x = r() * w;
+    const y = r() * h;
+    const rad = radius * (0.5 + r());
+    for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) {
+      if (x + ox < -rad || x + ox > w + rad || y + oy < -rad || y + oy > h + rad) continue;
+      const g = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, rad);
+      const v = light ? 255 : 0;
+      g.addColorStop(0, `rgba(${v},${v},${v},${alpha * r()})`);
+      g.addColorStop(1, `rgba(${v},${v},${v},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x + ox - rad, y + oy - rad, rad * 2, rad * 2);
+    }
+  }
+}
+
+/**
+ * Planked timber: pale Scandinavian oak for the hall, weathered boards for the terrace.
+ * Returns { map, normalMap, roughnessMap } tiling every `tileM` metres.
+ */
+export function plankSet({ size = 1024, planks = 16, hue = 33, sat = 34, light = 60, gap = 2, lenMin = 380, lenMax = 760, rough = [0.38, 0.6], seed = 7, strength = 2.2, weathered = false } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  const [rgh, rc] = makeCanvas(size, size);
+  const ph = size / planks;
+  hc.fillStyle = '#808080';
+  hc.fillRect(0, 0, size, size);
+  for (let row = 0; row < planks; row++) {
+    const y = row * ph;
+    let x = -r() * lenMax;
+    while (x < size) {
+      const len = lenMin + r() * (lenMax - lenMin);
+      const l = light + (r() - 0.5) * 6;
+      const hh = hue + (r() - 0.5) * 4;
+      const ss = sat + (r() - 0.5) * 10;
+      for (const ox of [0, size]) {
+        a.fillStyle = `hsl(${hh}, ${ss}%, ${l}%)`;
+        a.fillRect(x + ox, y, len, ph);
+        // long grain streaks
+        const streaks = weathered ? 26 : 16;
+        for (let g = 0; g < streaks; g++) {
+          const gy = y + r() * ph;
+          const dark = r() < 0.7;
+          a.strokeStyle = dark ? `rgba(70,42,18,${0.04 + r() * 0.1})` : `rgba(255,240,215,${0.04 + r() * 0.08})`;
+          a.lineWidth = 0.6 + r() * 1.8;
+          a.beginPath();
+          a.moveTo(x + ox, gy);
+          a.bezierCurveTo(x + ox + len * 0.3, gy + (r() - 0.5) * 7, x + ox + len * 0.65, gy + (r() - 0.5) * 7, x + ox + len, gy + (r() - 0.5) * 3);
+          a.stroke();
+          if (g < 5) {
+            hc.strokeStyle = `rgba(0,0,0,${0.05 + r() * 0.08})`;
+            hc.lineWidth = 1;
+            hc.stroke(new Path2D(`M${x + ox} ${gy} L${x + ox + len} ${gy + (r() - 0.5) * 3}`));
+          }
+        }
+        // the odd knot
+        if (r() < 0.22) {
+          const kx = x + ox + r() * len;
+          const ky = y + ph * (0.3 + r() * 0.4);
+          const kg = a.createRadialGradient(kx, ky, 0, kx, ky, ph * 0.22);
+          kg.addColorStop(0, 'rgba(60,34,14,0.55)');
+          kg.addColorStop(1, 'rgba(60,34,14,0)');
+          a.fillStyle = kg;
+          a.fillRect(kx - ph, ky - ph, ph * 2, ph * 2);
+        }
+        // per-plank height and gloss variation
+        const pv = Math.round(128 + (r() - 0.5) * 26);
+        hc.fillStyle = `rgba(${pv},${pv},${pv},0.55)`;
+        hc.fillRect(x + ox, y, len, ph);
+        const rv = Math.round((rough[0] + r() * (rough[1] - rough[0])) * 255);
+        rc.fillStyle = `rgb(${rv},${rv},${rv})`;
+        rc.fillRect(x + ox, y, len, ph);
+        // butt joint
+        a.fillStyle = 'rgba(30,18,8,0.3)';
+        a.fillRect(x + ox, y, gap, ph);
+        hc.fillStyle = '#000';
+        hc.fillRect(x + ox, y, gap + 1, ph);
+        rc.fillStyle = '#e6e6e6';
+        rc.fillRect(x + ox, y, gap + 1, ph);
+      }
+      x += len;
+    }
+    a.fillStyle = 'rgba(30,18,8,0.28)';
+    a.fillRect(0, y, size, gap);
+    hc.fillStyle = '#000';
+    hc.fillRect(0, y, size, gap + 1);
+    rc.fillStyle = '#e6e6e6';
+    rc.fillRect(0, y, size, gap + 1);
+  }
+  speckle(a, size, size, r, weathered ? 9000 : 5000, 0.045);
+  speckle(rc, size, size, r, 7000, 0.12, 255, 0, 3);
+  if (weathered) {
+    blotches(a, size, size, r, 40, size * 0.12, 0.16, false);
+  }
+  return {
+    map: dataTexture(alb, { srgb: true }),
+    normalMap: dataTexture(normalFromHeight(hgt, strength)),
+    roughnessMap: dataTexture(rgh),
+  };
+}
+
+/** Painted or exposed brick in running bond. */
+export function brickSet({ size = 512, rows = 14, cols = 5, base = [238, 234, 226], vary = 5, mortar = [214, 209, 199], seed = 3, strength = 3 } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  const bh = size / rows;
+  const bw = size / cols;
+  const m = Math.max(2, size / 170);
+  a.fillStyle = `rgb(${mortar})`;
+  a.fillRect(0, 0, size, size);
+  hc.fillStyle = '#2a2a2a';
+  hc.fillRect(0, 0, size, size);
+  for (let row = 0; row < rows; row++) {
+    const off = (row % 2) * bw * 0.5;
+    for (let c = -1; c <= cols; c++) {
+      const x = c * bw + off;
+      const y = row * bh;
+      const v = (r() - 0.5) * 2 * vary;
+      a.fillStyle = `rgb(${base.map((ch) => Math.round(Math.max(0, Math.min(255, ch + v)))).join(',')})`;
+      a.fillRect(x + m / 2, y + m / 2, bw - m, bh - m);
+      const hv = Math.round(175 + r() * 60);
+      hc.fillStyle = `rgb(${hv},${hv},${hv})`;
+      hc.fillRect(x + m / 2, y + m / 2, bw - m, bh - m);
+    }
+  }
+  speckle(a, size, size, r, 2500, 0.025);
+  speckle(hc, size, size, r, 4000, 0.12, 255, 0, 3);
+  return { map: dataTexture(alb, { srgb: true }), normalMap: dataTexture(normalFromHeight(hgt, strength)) };
+}
+
+/** Trowelled plaster: nearly flat colour with a soft, uneven surface. */
+export function plasterSet({ size = 256, seed = 11, strength = 1.2 } = {}) {
+  const r = rng(seed);
+  const [hgt, hc] = makeCanvas(size, size);
+  hc.fillStyle = '#808080';
+  hc.fillRect(0, 0, size, size);
+  blotches(hc, size, size, r, 60, size * 0.16, 0.35, true);
+  blotches(hc, size, size, r, 60, size * 0.16, 0.35, false);
+  speckle(hc, size, size, r, 5000, 0.18, 255, 0, 2);
+  return { normalMap: dataTexture(normalFromHeight(hgt, strength)) };
+}
+
+/** Ashlar stone blocks for the Ferry Building facade. */
+export function stoneSet({ size = 512, rows = 4, cols = 3, seed = 21 } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  a.fillStyle = '#ffffff';
+  a.fillRect(0, 0, size, size);
+  hc.fillStyle = '#9a9a9a';
+  hc.fillRect(0, 0, size, size);
+  const bh = size / rows;
+  const bw = size / cols;
+  for (let row = 0; row < rows; row++) {
+    for (let c = -1; c <= cols; c++) {
+      const x = c * bw + (row % 2) * bw * 0.5;
+      const v = Math.round(232 + r() * 23);
+      a.fillStyle = `rgb(${v},${v - 2},${v - 6})`;
+      a.fillRect(x + 1, row * bh + 1, bw - 2, bh - 2);
+      const hv = Math.round(150 + r() * 30);
+      hc.fillStyle = `rgb(${hv},${hv},${hv})`;
+      hc.fillRect(x + 2, row * bh + 2, bw - 4, bh - 4);
+    }
+    a.fillStyle = 'rgba(90,80,65,0.35)';
+    a.fillRect(0, row * bh, size, 2);
+    hc.fillStyle = '#303030';
+    hc.fillRect(0, row * bh, size, 3);
+  }
+  blotches(a, size, size, r, 30, size * 0.18, 0.12, false);
+  speckle(a, size, size, r, 12000, 0.07);
+  speckle(hc, size, size, r, 16000, 0.3, 255, 0, 3);
+  return { map: dataTexture(alb, { srgb: true }), normalMap: dataTexture(normalFromHeight(hgt, 2.4)) };
+}
+
+/** Vertical timber slats with shadow gaps (Scandinavian slat wall). U runs across the slats. */
+export function slatSet({ size = 512, slats = 10, seed = 5 } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  const sw = size / slats;
+  const gap = sw * 0.3;
+  a.fillStyle = '#17120d';
+  a.fillRect(0, 0, size, size);
+  hc.fillStyle = '#000';
+  hc.fillRect(0, 0, size, size);
+  for (let i = 0; i < slats; i++) {
+    const x = i * sw + gap / 2;
+    a.fillStyle = `hsl(${31 + r() * 5}, ${36 + r() * 8}%, ${58 + r() * 9}%)`;
+    a.fillRect(x, 0, sw - gap, size);
+    for (let g = 0; g < 9; g++) {
+      a.strokeStyle = `rgba(80,48,20,${0.05 + r() * 0.1})`;
+      a.lineWidth = 0.6 + r() * 1.4;
+      const gx = x + r() * (sw - gap);
+      a.beginPath();
+      a.moveTo(gx, 0);
+      a.bezierCurveTo(gx + (r() - 0.5) * 6, size * 0.3, gx + (r() - 0.5) * 6, size * 0.7, gx, size);
+      a.stroke();
+    }
+    const grad = hc.createLinearGradient(x, 0, x + sw - gap, 0);
+    grad.addColorStop(0, '#555');
+    grad.addColorStop(0.18, '#fff');
+    grad.addColorStop(0.82, '#fff');
+    grad.addColorStop(1, '#555');
+    hc.fillStyle = grad;
+    hc.fillRect(x, 0, sw - gap, size);
+  }
+  return { map: dataTexture(alb, { srgb: true }), normalMap: dataTexture(normalFromHeight(hgt, 3.5)) };
+}
+
+/** White-painted tongue-and-groove boards for the roof vault. V runs across the boards. */
+export function boardSet({ size = 256, boards = 8, seed = 9 } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  const bh = size / boards;
+  for (let i = 0; i < boards; i++) {
+    const v = Math.round(238 + r() * 14);
+    a.fillStyle = `rgb(${v},${v - 1},${v - 4})`;
+    a.fillRect(0, i * bh, size, bh);
+    hc.fillStyle = '#c0c0c0';
+    hc.fillRect(0, i * bh, size, bh);
+    a.fillStyle = 'rgba(60,55,48,0.5)';
+    a.fillRect(0, i * bh, size, 1.5);
+    hc.fillStyle = '#000';
+    hc.fillRect(0, i * bh, size, 2.5);
+  }
+  speckle(a, size, size, r, 2500, 0.04);
+  return { map: dataTexture(alb, { srgb: true }), normalMap: dataTexture(normalFromHeight(hgt, 2.5)) };
+}
+
+/** Woven cloth / carpet micro-relief (tinted by the material colour). */
+export function weaveSet({ size = 128, seed = 13, strength = 2 } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  a.fillStyle = '#fff';
+  a.fillRect(0, 0, size, size);
+  hc.fillStyle = '#707070';
+  hc.fillRect(0, 0, size, size);
+  const n = size / 4;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const over = (x + y) % 2 === 0;
+    const v = Math.round(over ? 190 + r() * 60 : 60 + r() * 50);
+    hc.fillStyle = `rgb(${v},${v},${v})`;
+    hc.fillRect(x * 4, y * 4, over ? 4 : 3, over ? 3 : 4);
+    a.fillStyle = `rgba(0,0,0,${0.02 + r() * 0.05})`;
+    a.fillRect(x * 4, y * 4, 4, 4);
+  }
+  return { map: dataTexture(alb, { srgb: true }), normalMap: dataTexture(normalFromHeight(hgt, strength)) };
+}
+
+/** Poured concrete / paving. */
+export function concreteSet({ size = 512, seed = 17 } = {}) {
+  const r = rng(seed);
+  const [alb, a] = makeCanvas(size, size);
+  const [hgt, hc] = makeCanvas(size, size);
+  a.fillStyle = '#a3a19b';
+  a.fillRect(0, 0, size, size);
+  hc.fillStyle = '#808080';
+  hc.fillRect(0, 0, size, size);
+  blotches(a, size, size, r, 40, size * 0.2, 0.12, false);
+  blotches(a, size, size, r, 30, size * 0.2, 0.1, true);
+  speckle(a, size, size, r, 14000, 0.1);
+  speckle(hc, size, size, r, 16000, 0.25, 255, 0, 3);
+  // saw-cut joints
+  a.fillStyle = 'rgba(40,40,40,0.5)';
+  a.fillRect(0, 0, size, 2);
+  a.fillRect(0, 0, 2, size);
+  hc.fillStyle = '#000';
+  hc.fillRect(0, 0, size, 3);
+  hc.fillRect(0, 0, 3, size);
+  return { map: dataTexture(alb, { srgb: true }), normalMap: dataTexture(normalFromHeight(hgt, 1.6)) };
+}
+
+/** Rewrite a BoxGeometry's UVs so textures tile in metres (tile = metres per repeat). */
+export function uvMeters(geo, w, h, d, tile = 1) {
+  const uv = geo.attributes.uv;
+  const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) {
+    const k = f * 4 + i;
+    uv.setXY(k, (uv.getX(k) * dims[f][0]) / tile, (uv.getY(k) * dims[f][1]) / tile);
+  }
+  uv.needsUpdate = true;
+  return geo;
 }
 
 // ---------- Branded graphics ----------

@@ -1,14 +1,15 @@
 import './style.css';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { scene, updaters, interactables } from './core.js';
+import { scene, updaters, interactables, duskFx } from './core.js';
 import { setMaxAnisotropy } from './world/tex.js';
-import { buildBuilding, PARTITIONS, DOOR_X } from './world/building.js';
+import { buildBuilding, PARTITIONS, DOOR_X, B } from './world/building.js';
 import { buildInterior } from './world/interior.js';
 import { buildOutdoor, BOOTH, outdoorRefs } from './world/outdoor.js';
 import { flushInstances, updatePeople, person } from './world/props.js';
 import { setGoatPlayer, petNearest, nearestGoatDist, herd } from './world/goats.js';
-import { staticBatch } from './game/batch.js';
+import { SUN_DIR, SUN_COLOR, DUSK_SUN_COLOR, SKY_UNIFORMS, makeSkyEnvironment, captureEnvironment } from './world/sky.js';
+import { staticBatch, assignShadows } from './game/batch.js';
+import { createPost, createGovernor, QUALITY } from './render/post.js';
 import { Player } from './game/player.js';
 import { initHUD, worldReady, setPrompt, updateHUD, toast, isModalOpen, isStarted, setTourActive, setTourCaption, resume } from './ui/hud.js';
 import './ui/features.js';
@@ -18,39 +19,95 @@ import { bleat } from './audio.js';
 import { COLORS } from './config.js';
 
 // ------------------------------------------------------------------ renderer
+// Quality tier: ?q=low|medium|high pins a tier; otherwise touch devices start on "low"
+// and everything else on "high". The frame-rate governor then scales the internal
+// resolution (and, unless pinned, the tier) to hold ~55 fps. ?gov=0 turns it off.
+const params = new URLSearchParams(location.search);
+const coarse = matchMedia('(pointer: coarse)').matches;
+let tier = QUALITY[params.get('q')] ? params.get('q') : coarse ? 'low' : 'high';
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, QUALITY[tier].maxDpr));
 renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.95;
+renderer.toneMapping = THREE.NoToneMapping; // tone mapping happens in the post pipeline
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap; // 17 taps; PCFSoft costs 36 per pixel
+renderer.shadowMap.autoUpdate = false; // every shadow caster is static: bake once
+renderer.info.autoReset = false;
 setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 4000);
+const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.15, 3500);
+const post = createPost(renderer, tier);
+post.U.exposure = 1.0;
+const govern = createGovernor(post, {
+  lockTier: !!QUALITY[params.get('q')],
+  onTier: (t) => {
+    tier = t;
+    renderer.setPixelRatio(Math.min(devicePixelRatio, QUALITY[t].maxDpr));
+    renderer.setSize(innerWidth, innerHeight);
+    post.setSize();
+    console.info(`[exa-summit] quality → ${t}`);
+  },
+});
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  post.setSize();
 });
 
 // ------------------------------------------------------------------ lighting
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.45;
-scene.background = new THREE.Color(0x2846b8);
-scene.fog = new THREE.FogExp2(0x6f78b4, 0.0011);
-scene.add(new THREE.HemisphereLight(0xe6ecff, 0x7a6450, 1.15));
-const sun = new THREE.DirectionalLight(0xffd2b0, 1.1);
-sun.position.set(-60, 40, -30);
-scene.add(sun);
-const fillDir = new THREE.DirectionalLight(0xc8d4ff, 0.45);
-fillDir.position.set(40, 30, 60);
-scene.add(fillDir);
-// soft interior fill along the hall
-for (const x of [-32, -17, -2, 18, 37]) {
-  const l = new THREE.PointLight(0xffe8c8, 12, 22, 1.2);
-  l.position.set(x, 5.4, 0);
+// Late afternoon: a warm western sun (shadows baked once), image-based light from the sky
+// outdoors and from a captured probe indoors, plus a couple of warm practical lights.
+const envOutdoor = makeSkyEnvironment(renderer, 0);
+const envDusk = makeSkyEnvironment(renderer, 1);
+let envIndoor = null;
+scene.environment = envOutdoor;
+scene.environmentIntensity = 1.0;
+const FOG_DAY = new THREE.Color(0.62, 0.7, 0.86);
+const FOG_DUSK = new THREE.Color(0.2, 0.19, 0.34);
+scene.fog = new THREE.FogExp2(FOG_DAY.clone(), 0.00042);
+
+const SHADOW_REGION = { minX: -47, maxX: 73, minZ: -46, maxZ: 38 };
+const SUN_INTENSITY = 6.5;
+const sun = new THREE.DirectionalLight(SUN_COLOR.clone(), SUN_INTENSITY);
+sun.castShadow = true;
+sun.shadow.mapSize.set(...QUALITY[tier].shadow);
+sun.shadow.bias = -0.0006;
+sun.shadow.normalBias = 0.045;
+sun.shadow.radius = 1.6;
+{
+  // fit the orthographic shadow frustum around the venue as seen from the sun
+  const center = new THREE.Vector3(13, 4, -8);
+  sun.position.copy(center).addScaledVector(SUN_DIR, 160);
+  sun.target.position.copy(center);
+  sun.target.updateMatrixWorld();
+  sun.updateMatrixWorld();
+  const view = new THREE.Matrix4().lookAt(sun.position, center, new THREE.Vector3(0, 1, 0)).invert();
+  view.multiply(new THREE.Matrix4().makeTranslation(-sun.position.x, -sun.position.y, -sun.position.z));
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  const corners = [];
+  for (const x of [SHADOW_REGION.minX, SHADOW_REGION.maxX]) for (const z of [SHADOW_REGION.minZ, 13]) for (const y of [0, 12.5]) corners.push([x, y, z]);
+  for (const x of [-4, 12]) for (const z of [22, 38]) for (const y of [0, 46]) corners.push([x, y, z]); // clock tower
+  for (const c of corners) box.expandByPoint(v.set(...c).applyMatrix4(view));
+  const cam = sun.shadow.camera;
+  cam.left = box.min.x - 1;
+  cam.right = box.max.x + 1;
+  cam.bottom = box.min.y - 1;
+  cam.top = box.max.y + 1;
+  cam.near = Math.max(1, -box.max.z - 2);
+  cam.far = -box.min.z + 2;
+  cam.updateProjectionMatrix();
+}
+scene.add(sun, sun.target);
+// Every extra light is paid for on every pixel, so in daylight the sun and the two
+// light probes do the work; only two warm practicals remain (the pendant globes are
+// the visible source, bloom sells the rest).
+for (const [x, z] of [[-28, 3], [6, 3]]) {
+  const l = new THREE.PointLight(0xffc890, 70, 34, 1.6);
+  l.position.set(x, 4.7, z);
   scene.add(l);
 }
 
@@ -58,7 +115,7 @@ for (const x of [-32, -17, -2, 18, 37]) {
 const player = new Player(camera, canvas);
 player.teleport(-36, 5.5, -Math.PI / 2 - 0.15, 0.02);
 setGoatPlayer(player.pos);
-window.__exa = { renderer, scene, camera, player };
+window.__exa = { renderer, scene, camera, player, post, sun, state, atmosphere: (p, dt) => updateAtmosphere(p, dt) };
 
 initHUD({
   player,
@@ -87,8 +144,68 @@ async function build() {
   buildAvatars();
   const stats = staticBatch(scene);
   console.info(`[exa-summit] batched ${stats.merged} meshes into ${stats.calls} draw calls`);
-  renderer.compile(scene, camera);
+  scene.updateMatrixWorld(true);
+  assignShadows(scene, SHADOW_REGION);
+  renderer.shadowMap.needsUpdate = true;
+  // Indoor light probe: capture the sunlit hall once, so interior materials pick up
+  // warm bounce light and reflect the windows and skylight.
+  envIndoor = captureEnvironment(renderer, scene, new THREE.Vector3(-8, 3.0, 4));
+  renderer.shadowMap.needsUpdate = true;
+  // Compile shaders for both light sets (afternoon, and dusk with the terrace lights on)
+  // now, so stepping outside never stalls on a recompile.
+  for (const on of [true, false]) {
+    for (const d of duskFx.lights) d.light.visible = on;
+    renderer.compile(scene, camera);
+  }
   worldReady();
+}
+
+const isIndoors = (p) => p.z > B.zN - 0.2 && p.z < B.zS && p.x > B.x0 && p.x < B.x1;
+
+// ------------------------------------------------------------------ time of day
+// The conference runs in afternoon light; the after party on the terrace is at dusk.
+// One factor (0 = afternoon, 1 = dusk) follows the player through the terrace door and
+// drives the sky, sun, fog, exposure, bloom, light probes and everything that glows.
+// state.duskParty (pause menu) turns the effect off.
+let duskT = 0;
+const lerp = THREE.MathUtils.lerp;
+function applyDusk(k, inside) {
+  SKY_UNIFORMS.uDusk.value = k;
+  sun.intensity = lerp(SUN_INTENSITY, 0.5, k);
+  sun.color.copy(SUN_COLOR).lerp(DUSK_SUN_COLOR, k);
+  scene.fog.color.copy(FOG_DAY).lerp(FOG_DUSK, k);
+  scene.fog.density = lerp(0.00042, 0.0007, k);
+  post.U.exposure = lerp(1.0, 1.28, k);
+  post.U.bloom = lerp(0.5, 1.0, k);
+  post.U.threshold = lerp(1.0, 0.75, k);
+  post.U.vignette = lerp(0.22, 0.34, k);
+  if (inside && envIndoor) {
+    scene.environment = envIndoor;
+    scene.environmentIntensity = lerp(1.3, 0.5, k);
+  } else if (k < 0.5) {
+    // two probes cannot be cross-faded, so dim the afternoon one to the brightness
+    // of the dusk one, swap, and carry on
+    scene.environment = envOutdoor;
+    scene.environmentIntensity = lerp(1.0, 0.3, k * 2);
+  } else {
+    scene.environment = envDusk;
+    scene.environmentIntensity = lerp(1.25, 1.0, k * 2 - 1);
+  }
+  const on = k > 0.002;
+  for (const d of duskFx.lights) {
+    d.light.visible = on;
+    d.light.intensity = d.base * k;
+  }
+  for (const e of duskFx.emissive) e.material.emissiveIntensity = lerp(e.day, e.dusk, k);
+  for (const c of duskFx.colors) c.material.color.copy(c.base).multiplyScalar(lerp(c.day, 1, k));
+  for (const m of duskFx.opacity) m.opacity = k;
+}
+function updateAtmosphere(p, dt) {
+  const inside = isIndoors(p);
+  const want = !inside && state.duskParty !== false ? 1 : 0;
+  // about three seconds door-to-dusk, eased
+  duskT = want > duskT ? Math.min(want, duskT + dt / 3.2) : Math.max(want, duskT - dt / 2.2);
+  applyDusk(duskT * duskT * (3 - 2 * duskT), inside);
 }
 
 // ------------------------------------------------------------------ interaction
@@ -150,7 +267,8 @@ actions.capturePhoto = () => {
   boothCam.updateProjectionMatrix();
   boothCam.position.set(BOOTH.standX - 0.2, 1.45, BOOTH.standZ + 2.7);
   boothCam.lookAt(BOOTH.standX - 0.2, 1.0, BOOTH.backdropZ);
-  renderer.render(scene, boothCam);
+  updateAtmosphere(boothCam.position, 0);
+  post.render(scene, boothCam, 0);
   const src = renderer.domElement;
   const out = document.createElement('canvas');
   const ar = 4 / 3;
@@ -187,7 +305,7 @@ const TOUR = [
   { x: 29, z: -19.5, yaw: -Math.PI / 4, pitch: 0.02, title: 'After party by the bay', text: 'String lights, a DJ, bistro tables, and the Bay Lights shimmering on the Bay Bridge.' },
   { x: 42.4, z: -29.8, yaw: -Math.PI / 2, pitch: -0.12, title: 'Goat petting zoo', text: 'A fenced pen with a little blue barn and very friendly goats. Some of them are wearing Exa bandanas.' },
   { x: 35.2, z: -33.5, yaw: 0.22, pitch: -0.04, title: 'Goat photo booth', text: 'Get a printed photo with the goats. Each print comes in a blue holder shaped like the Exa mark turned on its side.' },
-  { x: 22.5, z: -22.4, yaw: Math.PI, pitch: 0.1, title: 'The Exa-ited! bar', text: 'Exa-named cocktails like the Exa-ited!, Exa-ctly Right, Deep Research and the Neural Negroni, plus zero-proof options.' },
+  { x: 22.5, z: -22.4, yaw: Math.PI, pitch: 0.1, title: 'The Exa-ited! bar', text: 'Exa-named cocktails like the Exa-ited!, Exa-ctly Right, Deep Research and the Neural Negroni, plus zero-proof options. Not sure what to order? The kiosk beside it matches a cocktail to your mood.' },
   { x: 24, z: -35.5, yaw: 0, pitch: 0.12, title: 'Thanks for visiting', text: 'Take over and explore: press E at any station to try it. T teleports, G replays this tour.' },
 ];
 
@@ -301,7 +419,8 @@ function lerpAngle(a, b, t) {
 const clock = new THREE.Clock();
 let frame = 0;
 function loop() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
   const t = clock.elapsedTime;
   for (const fn of updaters) fn(dt, t);
   updatePeople(t);
@@ -314,7 +433,10 @@ function loop() {
     setPrompt(current ? current.label : '');
   } else setPrompt('');
   if (frame++ % 2 === 0) updateHUD(player.pos, player.yaw);
-  renderer.render(scene, camera);
+  updateAtmosphere(player.pos, dt);
+  renderer.info.reset();
+  post.render(scene, camera, t);
+  if (params.get('gov') !== '0') govern(rawDt);
   requestAnimationFrame(loop);
 }
 

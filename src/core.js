@@ -42,3 +42,34 @@ export function addSpot(name, x, z, yaw, group = 'Conference') {
 }
 
 export const v3 = (x, y, z) => new THREE.Vector3(x, y, z);
+
+/**
+ * Things that differ between the afternoon and the after-party dusk. main.js blends
+ * them with one 0..1 factor as the player steps out onto the terrace.
+ */
+export const duskFx = { lights: [], emissive: [], colors: [], opacity: [] };
+/** A light that only exists at dusk (hidden by day so it costs nothing per pixel). */
+export function duskLight(light) {
+  duskFx.lights.push({ light, base: light.intensity });
+  light.visible = false;
+  return light;
+}
+/** Emissive material whose glow goes from `day` to `dusk` intensity. */
+export function duskEmissive(material, day, dusk) {
+  duskFx.emissive.push({ material, day, dusk });
+  material.emissiveIntensity = day;
+  return material;
+}
+/** Unlit (basic) material whose colour is scaled from `day` to 1 at dusk: lamps switching on. */
+export function duskColor(material, day) {
+  duskFx.colors.push({ material, base: material.color.clone(), day });
+  material.color.multiplyScalar(day);
+  return material;
+}
+/** Material that fades in at dusk. */
+export function duskOpacity(material) {
+  duskFx.opacity.push(material);
+  material.transparent = true;
+  material.opacity = 0;
+  return material;
+}
