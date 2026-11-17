@@ -483,8 +483,9 @@ function buildMoodKiosk(kx, kz) {
     ctx.textAlign = 'center';
     ctx.fillText('Match me to a cocktail', w / 2, h * 0.915);
   }, { pxPerM: 700, emissive: 1.0 });
-  screen.position.set(0, 1.3, 0.102);
-  k.add(screen, box(0.82, 1.14, 0.02, M.black, 0, 1.3, 0.092));
+  // bezel sits proud of the body and the screen proud of the bezel: coplanar faces flicker
+  screen.position.set(0, 1.3, 0.118);
+  k.add(screen, box(0.82, 1.14, 0.02, M.black, 0, 1.3, 0.1));
   const mark = logoMesh(0.3, 0.02, M.white);
   mark.position.set(0, 0.4, 0.105);
   k.add(mark);
@@ -503,7 +504,7 @@ function buildMoodKiosk(kx, kz) {
     ctx.font = `600 ${h * 0.17}px ${FONT}`;
     ctx.fillText('The nearest-neighbour bar · tap to match', w / 2, h * 0.84);
   }, { pxPerM: 400, emissive: 0.7 });
-  sign.position.set(0, 2.72, 0.03);
+  sign.position.set(0, 2.72, 0.04);
   const signBack = box(1.74, 0.54, 0.04, M.blue, 0, 2.72, 0);
   k.add(mast, sign, signBack, blobShadow(1.8, 1.2));
   k.position.set(kx, 0, kz);
