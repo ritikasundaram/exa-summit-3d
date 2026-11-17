@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { M, box, cyl, blobShadow } from './mat.js';
+import { M, box, rbox, cyl, blobShadow } from './mat.js';
 import { logoGeometry, logoMesh } from './logo.js';
 import { scene, addColliderC, addColliderCircle } from '../core.js';
 import { COLORS } from '../config.js';
@@ -99,41 +99,88 @@ export function longTable(x, z, w, d, { h = 0.76, top = M.white, cloth = null, r
 }
 
 // ---------------- Plants ----------------
-const leafGeo = new THREE.IcosahedronGeometry(1, 1);
+// Real leaf blades instead of blobs: each plant is one merged geometry of curved,
+// pointed leaves, so a whole plant batches into the shared leaf materials.
+function leafBlade(len, wid, droop) {
+  const g = new THREE.PlaneGeometry(wid, len, 2, 4);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const t = p.getY(i) / len + 0.5; // 0 at the stem, 1 at the tip
+    const taper = Math.sin(Math.PI * Math.min(1, t * 0.92 + 0.08)) ** 0.7;
+    const x = p.getX(i) * taper;
+    p.setXYZ(i, x, t * len, droop * t * t * len - Math.abs(x) * 0.35);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+function foliage(count, { len = 0.34, wid = 0.16, spread = 0.3, y0 = 0.5, y1 = 1.0, droop = 0.45, up = 0.9 }) {
+  const parts = [];
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < count; i++) {
+    const s = 0.7 + Math.random() * 0.6;
+    const g = leafBlade(len * s, wid * s, droop * (0.6 + Math.random() * 0.8));
+    const a = Math.random() * Math.PI * 2;
+    const tilt = up * (0.25 + Math.random() * 0.75);
+    e.set(tilt, a, 0, 'YXZ');
+    q.setFromEuler(e);
+    const rr = spread * Math.sqrt(Math.random()) * 0.6;
+    m.compose(new THREE.Vector3(Math.sin(a) * rr, y0 + Math.random() * (y1 - y0), Math.cos(a) * rr), q, new THREE.Vector3(1, 1, 1));
+    g.applyMatrix4(m);
+    parts.push(g.toNonIndexed());
+  }
+  return mergeGeometries(parts);
+}
 export function plant(x, z, { size = 1, collide = true, tall = false } = {}) {
   const g = new THREE.Group();
-  const pot = cyl(0.26 * size, 0.2 * size, 0.5 * size, M.pot, 16);
+  const potMat = Math.random() < 0.45 ? M.terracotta : M.pot;
+  const pot = cyl(0.27 * size, 0.2 * size, 0.5 * size, potMat, 20);
   pot.position.y = 0.25 * size;
-  g.add(pot, blobShadow(0.9 * size));
+  const soil = cyl(0.25 * size, 0.25 * size, 0.02, M.woodDark, 20);
+  soil.position.y = 0.49 * size;
+  g.add(pot, soil, blobShadow(1.1 * size));
   if (tall) {
-    const trunk = cyl(0.025 * size, 0.035 * size, 1.4 * size, M.woodDark, 6);
-    trunk.position.y = 1.1 * size;
+    // fiddle-leaf style indoor tree: slim trunk, two leafy crowns
+    const trunk = cyl(0.022 * size, 0.034 * size, 1.5 * size, M.woodDark, 6);
+    trunk.position.y = 1.2 * size;
+    trunk.rotation.z = 0.04;
     g.add(trunk);
-  }
-  const n = tall ? 7 : 5;
-  for (let i = 0; i < n; i++) {
-    const l = new THREE.Mesh(leafGeo, i % 2 ? M.leaf : M.leafDark);
-    const a = Math.random() * Math.PI * 2;
-    const rr = (tall ? 0.35 : 0.22) * size * Math.random();
-    const y = tall ? (1.3 + Math.random() * 0.9) * size : (0.65 + Math.random() * 0.45) * size;
-    l.position.set(Math.cos(a) * rr, y, Math.sin(a) * rr);
-    l.scale.setScalar((tall ? 0.32 : 0.24) * size * (0.7 + Math.random() * 0.5));
-    l.rotation.set(Math.random(), Math.random(), Math.random());
-    g.add(l);
+    const a = new THREE.Mesh(foliage(34, { len: 0.42 * size, wid: 0.24 * size, spread: 0.55 * size, y0: 1.35 * size, y1: 2.25 * size, droop: 0.5, up: 1.25 }), M.leaf);
+    const b = new THREE.Mesh(foliage(22, { len: 0.38 * size, wid: 0.22 * size, spread: 0.45 * size, y0: 1.2 * size, y1: 2.1 * size, droop: 0.6, up: 1.35 }), M.leafDark);
+    g.add(a, b);
+  } else {
+    const a = new THREE.Mesh(foliage(26, { len: 0.52 * size, wid: 0.15 * size, spread: 0.22 * size, y0: 0.48 * size, y1: 0.62 * size, droop: 0.75, up: 0.95 }), M.leaf);
+    const b = new THREE.Mesh(foliage(16, { len: 0.44 * size, wid: 0.13 * size, spread: 0.2 * size, y0: 0.48 * size, y1: 0.6 * size, droop: 0.9, up: 1.2 }), M.leafDark);
+    g.add(a, b);
   }
   g.position.set(x, 0, z);
+  g.rotation.y = Math.random() * Math.PI * 2;
   scene.add(g);
   if (collide) addColliderCircle(x, z, 0.3 * size);
   return g;
 }
 
 // ---------------- Couch ----------------
+// Scandinavian sofa: soft-edged cushions on a slim oak frame with tapered legs.
 export function couch(x, z, rotY = 0, { w = 2.2, mat = M.fabricCream } = {}) {
   const g = new THREE.Group();
-  g.add(box(w, 0.4, 0.9, mat, 0, 0.22, 0));
-  g.add(box(w, 0.5, 0.22, mat, 0, 0.62, -0.36));
-  g.add(box(0.2, 0.32, 0.9, mat, -w / 2 + 0.1, 0.55, 0));
-  g.add(box(0.2, 0.32, 0.9, mat, w / 2 - 0.1, 0.55, 0));
+  g.add(box(w - 0.04, 0.05, 0.84, M.wood, 0, 0.2, 0));
+  const seats = w > 1.4 ? 2 : 1;
+  const sw = (w - 0.36) / seats;
+  for (let i = 0; i < seats; i++) {
+    const cx = -((seats - 1) * sw) / 2 + i * sw;
+    g.add(rbox(sw - 0.02, 0.22, 0.7, mat, cx, 0.34, 0.05, 0.07));
+    const back = rbox(sw - 0.02, 0.46, 0.2, mat, cx, 0.66, -0.3, 0.08);
+    back.rotation.x = -0.12;
+    g.add(back);
+  }
+  for (const sx of [-1, 1]) g.add(rbox(0.18, 0.4, 0.86, mat, sx * (w / 2 - 0.09), 0.44, 0, 0.07));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const leg = cyl(0.022, 0.014, 0.2, M.woodDark, 8);
+    leg.position.set(sx * (w / 2 - 0.12), 0.1, sz * 0.34);
+    g.add(leg);
+  }
   g.add(blobShadow(w * 1.2, 1.4));
   g.position.set(x, 0, z);
   g.rotation.y = rotY;
@@ -145,14 +192,40 @@ export function couch(x, z, rotY = 0, { w = 2.2, mat = M.fabricCream } = {}) {
 
 export function coffeeTable(x, z, r = 0.45) {
   const g = new THREE.Group();
-  const t = cyl(r, r, 0.06, M.wood, 24);
-  t.position.y = 0.38;
-  const s = cyl(r * 0.6, r * 0.6, 0.35, M.wood, 20);
-  s.position.y = 0.18;
-  g.add(t, s, blobShadow(r * 2.4));
+  const t = cyl(r, r, 0.035, M.wood, 32);
+  t.position.y = 0.4;
+  g.add(t);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const leg = cyl(0.016, 0.012, 0.4, M.black, 8);
+    leg.position.set(Math.cos(a) * r * 0.62, 0.2, Math.sin(a) * r * 0.62);
+    leg.rotation.set(Math.sin(a) * 0.14, 0, -Math.cos(a) * 0.14);
+    g.add(leg);
+  }
+  // a couple of books and a ceramic cup so the table reads as lived-in
+  g.add(box(0.2, 0.025, 0.27, M.blue, -r * 0.25, 0.43, r * 0.1));
+  g.add(box(0.18, 0.02, 0.25, M.white, -r * 0.24, 0.452, r * 0.11));
+  const cup = cyl(0.04, 0.032, 0.07, M.white, 12);
+  cup.position.set(r * 0.3, 0.452, -r * 0.2);
+  g.add(cup, blobShadow(r * 2.4));
   g.position.set(x, 0, z);
   scene.add(g);
   addColliderCircle(x, z, r);
+  return g;
+}
+
+/** Flat woven rug with a darker border. */
+export function rug(x, z, w, d, color = 0xd9d2c4, border = 0x8f8676) {
+  const g = new THREE.Group();
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(w, d), cmCloth(border));
+  outer.rotation.x = -Math.PI / 2;
+  outer.position.y = 0.018;
+  const inner = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.3, d - 0.3), cmCloth(color));
+  inner.rotation.x = -Math.PI / 2;
+  inner.position.y = 0.022;
+  g.add(outer, inner);
+  g.position.set(x, 0, z);
+  scene.add(g);
   return g;
 }
 
@@ -189,6 +262,10 @@ const P = {
   head: new THREE.SphereGeometry(0.115, 16, 12),
   hair: new THREE.SphereGeometry(0.122, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
   bun: new THREE.SphereGeometry(0.07, 10, 8),
+  neck: new THREE.CylinderGeometry(0.048, 0.055, 0.1, 10),
+  hand: new THREE.SphereGeometry(0.048, 10, 8).scale(0.85, 1.15, 0.6).translate(0, -0.58, 0),
+  shoe: new THREE.BoxGeometry(0.1, 0.07, 0.25).translate(0, -0.83, 0.05),
+  shoeSeated: new THREE.BoxGeometry(0.1, 0.07, 0.25).translate(0, -0.5, 0.05),
   badge: new THREE.PlaneGeometry(0.08, 0.11),
   thigh: new THREE.CylinderGeometry(0.075, 0.07, 0.46, 8).rotateX(Math.PI / 2).translate(0, 0, 0.21),
   shin: new THREE.CylinderGeometry(0.065, 0.055, 0.5, 8).translate(0, -0.25, 0),
@@ -204,12 +281,22 @@ const cm = (hex, r = 0.8) => {
   return matCache.get(k);
 };
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const clothCache = new Map();
+function cmCloth(hex) {
+  if (!clothCache.has(hex)) {
+    const m = M.fabricCream.clone();
+    m.color.set(hex);
+    clothCache.set(hex, m);
+  }
+  return clothCache.get(hex);
+}
 
 export const people = [];
 export function person(x, z, rotY = 0, o = {}) {
-  const skin = cm(o.skin ?? pick(skinTones));
-  const shirt = cm(o.shirt ?? pick(shirtColors));
-  const pants = cm(o.pants ?? pick(pantColors));
+  const skin = cm(o.skin ?? pick(skinTones), 0.6);
+  const shirt = cmCloth(o.shirt ?? pick(shirtColors));
+  const pants = cmCloth(o.pants ?? pick(pantColors));
+  const shoeMat = cm(pick([0x1b1b1d, 0xf2f0ea, 0x3a2a20]), 0.55);
   const hair = cm(o.hair ?? pick(hairColors), 0.9);
   const s = o.scale ?? 0.92 + Math.random() * 0.14;
   const g = new THREE.Group();
@@ -223,13 +310,17 @@ export function person(x, z, rotY = 0, o = {}) {
       th.position.set(sx, 0.5, 0);
       const sh = new THREE.Mesh(P.shin, pants);
       sh.position.set(sx, 0.5, 0.42);
-      legs.push(th, sh);
+      const shoe = new THREE.Mesh(P.shoeSeated, shoeMat);
+      shoe.position.set(sx, 0.5, 0.42);
+      legs.push(th, sh, shoe);
     }
   } else {
     for (const sx of [-0.1, 0.1]) {
       const l = new THREE.Mesh(P.leg, pants);
       l.position.set(sx, 0.86, 0);
-      legs.push(l);
+      const shoe = new THREE.Mesh(P.shoe, shoeMat);
+      shoe.position.set(sx, 0.86, 0);
+      legs.push(l, shoe);
     }
   }
   const torso = new THREE.Mesh(P.torso, shirt);
@@ -250,7 +341,13 @@ export function person(x, z, rotY = 0, o = {}) {
     cup.position.set(0, -0.55, 0.02);
     armL.add(cup);
   }
+  armL.add(new THREE.Mesh(P.hand, skin));
+  armR.add(new THREE.Mesh(P.hand, skin));
+  const neck = new THREE.Mesh(P.neck, skin);
+  neck.position.y = 1.53;
+  upper.add(neck);
   const head = new THREE.Mesh(P.head, skin);
+  head.scale.set(0.94, 1.08, 1);
   head.position.y = 1.66;
   const hairM = new THREE.Mesh(P.hair, hair);
   hairM.position.y = 1.675;
@@ -268,7 +365,7 @@ export function person(x, z, rotY = 0, o = {}) {
     upper.add(badge);
   }
   if (o.shirtLogo) {
-    const lg = logoMesh(0.13, 0.01, shirt === cm(0xffffff) ? M.blue : M.white);
+    const lg = logoMesh(0.13, 0.01, shirt === cmCloth(0xffffff) ? M.blue : M.white);
     lg.position.set(0.07, 1.3, 0.145);
     upper.add(lg);
   }
@@ -282,9 +379,57 @@ export function person(x, z, rotY = 0, o = {}) {
   if (o.animate ?? !!o.gesture) {
     people.push(g);
     g.userData.dynamic = true;
+    bakePerson(g, body, armR, !!o.gesture);
   }
   if (!o.noCollide) addColliderCircle(x, z, 0.3);
   return g;
+}
+
+// Animated people cannot join the static batch, so collapse each one into a single
+// vertex-coloured mesh (plus the gesturing arm): ~17 draw calls become 2.
+const personMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82 });
+function bakeMeshes(root, meshes) {
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const m4 = new THREE.Matrix4();
+  const geos = [];
+  for (const m of meshes) {
+    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+    g.applyMatrix4(m4.multiplyMatrices(inv, m.matrixWorld));
+    const c = m.material.color;
+    const col = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i < col.length; i += 3) {
+      col[i] = c.r;
+      col[i + 1] = c.g;
+      col[i + 2] = c.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geos.push(g);
+  }
+  return mergeGeometries(geos, false);
+}
+function bakePerson(g, body, armR, gesture) {
+  g.updateMatrixWorld(true);
+  const plain = (m) => m.isMesh && !Array.isArray(m.material) && !m.material.transparent && !(m.material.emissiveIntensity > 0 && m.material.emissive?.getHex() > 0) && m.material !== M.blob;
+  const under = (m, root) => {
+    for (let p = m; p; p = p.parent) if (p === root) return true;
+    return false;
+  };
+  const armParts = [];
+  const bodyParts = [];
+  body.traverse((m) => {
+    if (!plain(m)) return;
+    if (gesture && under(m, armR)) armParts.push(m);
+    else bodyParts.push(m);
+  });
+  const bodyGeo = bakeMeshes(body, bodyParts);
+  const armGeo = gesture ? bakeMeshes(armR, armParts) : null;
+  for (const m of [...bodyParts, ...armParts]) if (!(gesture && m === armR)) m.parent.remove(m);
+  body.add(new THREE.Mesh(bodyGeo, personMat));
+  if (gesture) {
+    armR.geometry = armGeo;
+    armR.material = personMat;
+  }
 }
 
 export function updatePeople(t) {
@@ -591,15 +736,18 @@ export function stanchion(x, z) {
   scene.add(g);
 }
 
-export function pendantLight(x, y, z, glowMat) {
+/** Opal-glass globe pendant on a cord, hung from yTop and dropping `drop` metres. */
+const globeGeo = new THREE.SphereGeometry(0.2, 24, 16);
+export function pendantLight(x, yTop, z, drop = 2.2) {
   const g = new THREE.Group();
-  const cord = cyl(0.006, 0.006, 1.2, M.black, 4);
-  cord.position.y = 0.6;
-  const shade = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.25, 20, 1, true), M.black);
-  shade.material.side = THREE.DoubleSide;
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), glowMat);
-  bulb.position.y = -0.1;
-  g.add(cord, shade, bulb);
-  g.position.set(x, y, z);
+  const cord = cyl(0.006, 0.006, drop, M.black, 5);
+  cord.position.y = -drop / 2;
+  const cap = cyl(0.035, 0.06, 0.09, M.gold, 14);
+  cap.position.y = -drop + 0.03;
+  const globe = new THREE.Mesh(globeGeo, M.globe);
+  globe.position.y = -drop - 0.17;
+  g.add(cord, cap, globe);
+  g.position.set(x, yTop, z);
   scene.add(g);
+  return g;
 }

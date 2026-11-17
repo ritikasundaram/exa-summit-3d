@@ -4,8 +4,8 @@ import { M, box, cyl, blobShadow } from './mat.js';
 import { logoMesh } from './logo.js';
 import { textPlane, canvasTexture } from './tex.js';
 import { G } from './graphics.js';
-import { B } from './building.js';
-import { chair, stool, roundTable, longTable, plant, couch, coffeeTable, podium, person, cluster, hourglass, goatPenHolder, hoodie, cookie, stanchion } from './props.js';
+import { B, ceilY } from './building.js';
+import { chair, stool, roundTable, longTable, plant, couch, coffeeTable, rug, podium, person, cluster, hourglass, goatPenHolder, hoodie, cookie, stanchion } from './props.js';
 import { act, actions } from '../actions.js';
 import { leaderboard } from '../state.js';
 import { QUOTES } from '../data/agenda.js';
@@ -66,8 +66,9 @@ function buildLounge() {
   banner2.position.z = 8.21;
   scene.add(banner2);
   for (const dx of [-2.8, 2.8]) {
-    const wire = cyl(0.005, 0.005, 1.8, M.darkMetal, 4);
-    wire.position.set(-34 + dx, 6.1, 8.2);
+    const wl = ceilY(8.2) - 5.2; // up to the roof vault
+    const wire = cyl(0.005, 0.005, wl, M.darkMetal, 4);
+    wire.position.set(-34 + dx, 5.2 + wl / 2, 8.2);
     scene.add(wire);
   }
 
@@ -156,10 +157,11 @@ function buildLounge() {
   cap.scale.setScalar(0.9);
 
   // Lounge seating
-  couch(-30.5, -9.4, 0);
+  rug(-30.5, -7.5, 4.4, 5.6);
+  couch(-30.5, -9.4, 0, { mat: M.fabricSage });
   couch(-30.5, -5.6, PI);
   coffeeTable(-30.5, -7.5);
-  couch(-25.6, -3.2, -PI / 2, { w: 2, mat: M.fabricTan });
+  couch(-25.6, -3.2, -PI / 2, { w: 2, mat: M.fabricRust });
   plant(-41, -10.8, { tall: true, size: 1.1 });
   plant(-24, -10.8, { tall: true });
   plant(-41, 2.5);
@@ -218,7 +220,7 @@ function buildCafe() {
     c.position.set(-20.45 + (i % 2) * 0.1, 1.16 + Math.floor(i / 4) * 0.0, -9.35 + Math.floor(i / 2) * 0.09);
     scene.add(c);
   }
-  const waterMat = new THREE.MeshPhysicalMaterial({ color: 0x9fc4ff, transparent: true, opacity: 0.55, roughness: 0.05 });
+  const waterMat = new THREE.MeshPhysicalMaterial({ color: 0x9fc4ff, transparent: true, opacity: 0.55, roughness: 0.12 });
   for (const [z, label] of [[-8.8, 0], [-8.35, 1]]) {
     const jug = cyl(0.12, 0.12, 0.42, M.clearGlass, 22);
     jug.position.set(-20.7, 1.32, z);
@@ -578,19 +580,20 @@ function buildGallery() {
 // ---------------------------------------------------------------- Salon
 function buildSalon() {
   wallGraphic(10, 3.4, G.salonBackdrop, B.x1 - 0.03, 2.3, -3.5, '-x', { emissive: 0.15 });
-  couch(36.5, -1.5, PI / 2);
+  couch(36.5, -1.5, PI / 2, { mat: M.fabricNavy });
   couch(39.8, -1.5, -PI / 2);
   coffeeTable(38.15, -1.5);
-  couch(38, 6.2, PI, { mat: M.fabricTan });
+  rug(38, 5.2, 3.6, 3.4, 0xcfc6b4, 0x7d8f78);
+  couch(38, 6.2, PI, { mat: M.fabricSage });
   coffeeTable(38, 4.6, 0.35);
   plant(43, -10.8, { tall: true, size: 1.1 });
   plant(32, -10.8, { tall: true });
   plant(43, 10.8);
   // rug
-  const rug = new THREE.Mesh(new THREE.CircleGeometry(2.6, 40), new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 1 }));
-  rug.rotation.x = -PI / 2;
-  rug.position.set(38.15, 0.025, -1.5);
-  scene.add(rug);
+  const roundRug = new THREE.Mesh(new THREE.CircleGeometry(2.6, 48), M.fabricCream);
+  roundRug.rotation.x = -PI / 2;
+  roundRug.position.set(38.15, 0.025, -1.5);
+  scene.add(roundRug);
   // door sign + floor arrows
   wallGraphic(3.6, 0.7, G.doorSign, 40, 5.8, B.zN + 0.24, '+z', { emissive: 0.5, px: 300 });
   for (let i = 0; i < 4; i++) {
@@ -629,6 +632,12 @@ function buildCorridor() {
     rod.rotation.set(PI / 2, 0, 0);
     rod.rotation.y = 0;
     scene.add(rod);
+    for (const dz of [-0.6, 0.6]) {
+      const wl = ceilY(7.6 + dz) - 6.12;
+      const wire = cyl(0.004, 0.004, wl, M.darkMetal, 4);
+      wire.position.set(x, 6.12 + wl / 2, 7.6 + dz);
+      scene.add(wire);
+    }
   });
   // a few people walking the hallway
   cluster(-8, 7.5, 3, 0.8, { drinks: true });

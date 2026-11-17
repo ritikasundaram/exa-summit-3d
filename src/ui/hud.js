@@ -1,5 +1,5 @@
 import { h, $, logoSVG } from './dom.js';
-import { state, onState, CHECKLIST, BAG_ITEMS, resetState } from '../state.js';
+import { state, save, onState, CHECKLIST, BAG_ITEMS, resetState } from '../state.js';
 import { zones, interactables, spots } from '../core.js';
 import { EVENT } from '../config.js';
 import { isMuted, setMuted, unlockAudio, beep } from '../audio.js';
@@ -160,6 +160,7 @@ function showPause() {
       h('button.btn.ghost', { onclick: () => { hidePause(); openTeleport(); } }, 'Teleport to a station'),
       h('button.btn.ghost', { onclick: () => { hidePause(); cb.startTour?.(); } }, 'Guided tour'),
       h('button.btn.ghost', { onclick: () => { hidePause(); openHelp(); } }, 'About this concept'),
+      h(`button.btn.ghost.toggle${state.duskParty ? '.on' : ''}`, { onclick: (e) => { const b = e.currentTarget; state.duskParty = !state.duskParty; save(); b.lastChild.textContent = state.duskParty ? 'On' : 'Off'; b.classList.toggle('on', state.duskParty); }, title: 'When on, the Bay Terrace fades to dusk for the after party as you step outside' }, h('span', {}, 'Dusk on the terrace'), h('b', {}, state.duskParty ? 'On' : 'Off')),
       h('button.btn.ghost.danger', { onclick: () => { hidePause(); confirmReset(); } }, 'Reset game'),
     ),
   );

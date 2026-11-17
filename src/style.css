@@ -27,6 +27,10 @@ kbd { font-family: var(--mono); font-size: 11px; background: rgba(255,255,255,.1
 .btn.ghost { background: var(--blue-soft); color: var(--blue); }
 .btn.ghost:hover { background: #dfe5ff; }
 .btn.small { padding: 8px 14px; font-size: 13px; }
+.btn.toggle { justify-content: space-between; padding: 12px 14px 12px 22px; }
+.btn.toggle span { font: inherit; }
+.btn.toggle b { background: #c5cce6; color: #4a5378; border-radius: 999px; padding: 3px 0; width: 44px; font-size: 12px; text-align: center; transition: background .2s, color .2s; }
+.btn.toggle.on b { background: var(--blue); color: #fff; }
 .btn:disabled { opacity: .5; cursor: default; box-shadow: none; }
 
 /* ---------- HUD ---------- */
@@ -252,6 +256,53 @@ mark { background: #fff1a8; color: inherit; padding: 0 2px; border-radius: 3px; 
 .stage-slide span { opacity: .85; }
 .stage-now p { margin: 12px 0 0; opacity: .85; font-size: 14px; }
 .stage .btn { margin-top: 12px; }
+
+/* ---------- nearest-neighbour bar ---------- */
+.mood { display: grid; grid-template-columns: 1.15fr 1fr; gap: 22px; align-items: start; }
+.mood-input { display: flex; gap: 8px; margin: 12px 0 10px; }
+.mood-input .text { flex: 1; min-width: 0; }
+.mood .sugs { display: flex; flex-wrap: wrap; gap: 6px; }
+.mood-out { margin-top: 16px; min-height: 250px; }
+.mood-call { display: flex; justify-content: space-between; gap: 10px; font: 600 12px 'JetBrains Mono', monospace; color: var(--muted); background: #f3f5ff; border-radius: 10px; padding: 8px 12px; }
+.mood-call .tool-name { color: var(--blue); }
+.mood-read { margin: 10px 2px; font-size: 13px; color: #3b4263; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.mood-read b { color: var(--ink); }
+.mood .na { background: #e9f8ef; color: #17804a; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+.mood-card { display: grid; grid-template-columns: 64px 1fr; gap: 14px; border: 1.5px solid var(--blue); border-radius: 18px; padding: 14px; box-shadow: 0 10px 30px rgba(33,65,234,.12); }
+.mood-card .glass, .mood-done .glass { width: 54px; }
+.mood-card h3 { margin: 2px 0 0; font-size: 20px; letter-spacing: -.01em; display: flex; align-items: center; flex-wrap: wrap; }
+.mood-card p { margin: 3px 0 0; font-size: 13px; color: #3b4263; }
+.mood-card p.short { color: var(--muted); font-weight: 600; }
+.mood-rank { font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--blue); }
+.mood-sim { display: flex; align-items: center; gap: 10px; margin-top: 10px; font: 600 12px 'JetBrains Mono', monospace; color: var(--muted); }
+.mood-sim .bar { flex: 1; height: 8px; background: var(--blue-soft); border-radius: 99px; overflow: hidden; }
+.mood-sim .bar i { display: block; height: 100%; background: var(--blue); border-radius: 99px; transition: width .4s; }
+.mood-card p.mood-why { font-size: 12px; color: var(--muted); }
+.mood-q { margin: 14px 2px 8px; font-weight: 800; font-size: 16px; }
+.mood-actions { display: flex; gap: 10px; }
+.mood-actions .btn { flex: 1; }
+.mood-miss, .mood-done { border: 1px dashed var(--line); border-radius: 16px; padding: 16px; font-size: 14px; color: #3b4263; }
+.mood-done { display: grid; grid-template-columns: 64px 1fr; gap: 14px; align-items: center; border-style: solid; border-color: #bfe8cf; background: #f3fbf6; }
+.mood-done h3 { margin: 0; font-size: 18px; }
+.mood-done p { margin: 4px 0 0; font-size: 13px; }
+.mood-map { position: relative; aspect-ratio: 1 / 1; border-radius: 18px; border: 1px solid var(--line); background: radial-gradient(circle at 50% 50%, #fff 0, #f4f6ff 100%); overflow: hidden; }
+.mood-map::before, .mood-map::after { content: ''; position: absolute; background: var(--line); }
+.mood-map::before { left: 50%; top: 8%; bottom: 8%; width: 1px; }
+.mood-map::after { top: 50%; left: 8%; right: 8%; height: 1px; }
+.mood-dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--c); border: 1.5px solid rgba(13,19,48,.35); transition: transform .25s, opacity .25s, box-shadow .25s; z-index: 1; }
+.mood-dot.passed { opacity: .25; }
+.mood-dot.out { opacity: .12; }
+.mood-dot.pick { transform: scale(1.9); box-shadow: 0 0 0 4px rgba(33,65,234,.25); border-color: var(--blue); z-index: 3; }
+.mood-you { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; background: #fff; border: 2px solid var(--blue); display: none; place-items: center; z-index: 4; box-shadow: 0 4px 14px rgba(33,65,234,.35); transition: left .35s, top .35s; }
+.mood-you.on { display: grid; }
+.mood-link { position: absolute; height: 2px; background: var(--blue); transform-origin: 0 50%; display: none; z-index: 2; opacity: .7; }
+.mood-link.on { display: block; }
+.mood-map .ax { position: absolute; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.ax-l { left: 10px; top: 50%; transform: translateY(-140%); }
+.ax-r { right: 10px; top: 50%; transform: translateY(-140%); }
+.ax-t { top: 8px; left: 50%; transform: translateX(8px); }
+.ax-b { bottom: 8px; left: 50%; transform: translateX(8px); }
+@media (max-width: 760px) { .mood { grid-template-columns: 1fr; } .mood-map { max-width: 360px; } .mood-out { min-height: 0; } }
 
 /* ---------- drinks ---------- */
 .drink-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

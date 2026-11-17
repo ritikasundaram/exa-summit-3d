@@ -4,6 +4,7 @@ import { state, save, addToBag, visit, leaderboard } from '../state.js';
 import { actions } from '../actions.js';
 import { AGENDA, ROOMS, SPEAKERS, PLACES } from '../data/agenda.js';
 import { DRINKS } from '../data/drinks.js';
+import { COCKTAILS, DIM_LABEL, matchCocktails, project } from '../data/cocktails.js';
 import { EVENT } from '../config.js';
 import { beep, chime, buzz, shutter, pop } from '../audio.js';
 import { drawLogo, LOGO_W, LOGO_H, HOODIE_PATHS } from '../world/logo.js';
@@ -638,6 +639,123 @@ actions.drinks = () => {
     })),
   );
   openModal({ title: 'The Exa-ited! Bar', kicker: 'Bay Terrace · After party', body, wide: true });
+};
+
+// ================================================================== Nearest-neighbour bar (mood kiosk)
+actions.moodbar = () => {
+  const input = h('input.text', { placeholder: 'e.g. just shipped, a bit tired, feeling fancy…', maxlength: 120 });
+  const out = h('div.mood-out');
+  const map = h('div.mood-map');
+  const moods = ['Just shipped something big', 'Long day, need to unwind', 'Cold and foggy', 'Feeling adventurous', 'Tired, but it’s a party', 'Fancy, like James Bond', 'Beach holiday mode', 'Zero-proof and celebrating'];
+  let result = null;
+  let rank = 0;
+
+  // 2D view of the cocktail space: every drink is a dot, your mood is the Exa mark
+  const pos = ([x, y]) => ({ left: `${50 + x * 44}%`, top: `${50 - y * 42}%` });
+  const dots = COCKTAILS.map((c) => {
+    const d = h('i.mood-dot', { title: c.name, style: { ...pos(project(c.e)), '--c': c.color } });
+    map.append(d);
+    return d;
+  });
+  const you = h('div.mood-you', { html: logoSVG('#2141EA', 18) });
+  const link = h('div.mood-link');
+  map.append(link, you, h('span.ax.ax-l', {}, 'mellow'), h('span.ax.ax-r', {}, 'lively'), h('span.ax.ax-t', {}, 'strong'), h('span.ax.ax-b', {}, 'light'));
+  const drawMap = () => {
+    you.classList.toggle('on', !!result?.known);
+    link.classList.toggle('on', !!result?.known);
+    dots.forEach((d, i) => {
+      const r = result?.known ? result.ranked.findIndex((x) => x.drink === COCKTAILS[i]) : -1;
+      d.classList.toggle('pick', r === rank && !!result?.known);
+      d.classList.toggle('passed', r >= 0 && r < rank);
+      d.classList.toggle('out', !!result?.known && r < 0);
+    });
+    if (!result?.known) return;
+    const [qx, qy] = project(result.vector);
+    const [dx, dy] = project(result.ranked[rank].drink.e);
+    Object.assign(you.style, pos([qx, qy]));
+    // line from your mood to the current match, in map percentages
+    const ax = 50 + qx * 44;
+    const ay = 50 - qy * 42;
+    const bx = 50 + dx * 44;
+    const by = 50 - dy * 42;
+    const w = map.clientWidth || 1;
+    const hgt = map.clientHeight || 1;
+    const px = ((bx - ax) / 100) * w;
+    const py = ((by - ay) / 100) * hgt;
+    Object.assign(link.style, { left: `${ax}%`, top: `${ay}%`, width: `${Math.hypot(px, py)}px`, transform: `rotate(${Math.atan2(py, px)}rad)` });
+  };
+
+  const show = () => {
+    out.replaceChildren();
+    if (!result) return;
+    if (!result.known) {
+      out.append(h('div.mood-miss', {}, h('b', {}, 'I couldn’t place that mood.'), ' Try a feeling or an occasion: tired, celebrating, cozy, adventurous, fancy, beachy…'));
+      drawMap();
+      return;
+    }
+    const m = result.ranked[rank % result.ranked.length];
+    const d = m.drink;
+    const pct = Math.max(0, Math.round(m.score * 100));
+    const yes = h('button.btn.primary', { onclick: () => {
+      yes.disabled = no.disabled = true;
+      yes.textContent = 'Shaking…';
+      beep(300, 0.05, 'triangle', 0.08);
+      setTimeout(() => {
+        addToBag('drink');
+        check('drinks', 'Order at the Exa-ited! bar');
+        toast(`🍸 One <b>${escapeHTML(d.name)}</b>, matched to your mood`);
+        chime();
+        out.replaceChildren(h('div.mood-done', {}, h('div.glass', { style: { '--c': d.color } }, h('i')), h('div', {}, h('h3', {}, `Enjoy your ${d.name}!`), h('p', {}, 'The bartender has your order. Feeling something else now? Type a new mood.'))));
+        input.focus();
+      }, 900);
+    } }, 'Yes, pour it');
+    const no = h('button.btn.ghost', { onclick: () => {
+      rank = (rank + 1) % result.ranked.length;
+      pop?.();
+      show();
+    } }, 'No, next closest');
+    out.append(
+      h('div.mood-call', { html: `<span class="tool-name">embed(mood) → nearest_neighbour</span><span class="lat">${result.ranked.length} drinks · ${result.ms}ms</span>` }),
+      h('div.mood-read', {}, 'Read your mood as ', ...result.signals.flatMap((sg, i) => [i ? ' · ' : '', h('b', {}, DIM_LABEL[sg])]), result.na ? h('span.na', {}, 'zero-proof only') : null),
+      h('div.mood-card', {},
+        h('div.glass', { style: { '--c': d.color } }, h('i')),
+        h('div', {},
+          h('div.mood-rank', {}, rank === 0 ? 'Closest match' : `Match #${rank + 1}`, d.signature ? ' · on the menu' : ' · off-menu'),
+          h('h3', {}, d.name, d.na ? h('span.na', {}, 'zero-proof') : null),
+          h('p.short', {}, d.short),
+          h('p', {}, d.long),
+          h('div.mood-sim', {}, h('div.bar', {}, h('i', { style: { width: `${pct}%` } })), h('span', {}, `similarity ${m.score.toFixed(2)}`)),
+          m.why.length ? h('p.mood-why', {}, 'Matched on ', m.why.map((w) => DIM_LABEL[w]).join(' · ')) : null,
+        ),
+      ),
+      h('div.mood-q', {}, 'Is this the one?'),
+      h('div.mood-actions', {}, yes, no),
+    );
+    drawMap();
+  };
+
+  const ask = (text) => {
+    const q = (text ?? input.value).trim();
+    if (!q) return;
+    input.value = q;
+    result = matchCocktails(q);
+    result.ms = 120 + Math.round(Math.random() * 70);
+    rank = 0;
+    beep(880, 0.04);
+    show();
+  };
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && ask());
+  const body = h('div.mood', {},
+    h('div.mood-left', {},
+      h('p.lead', {}, 'Tell the bar how you feel instead of what you want. Your mood is embedded into the same space as every cocktail, and the nearest neighbour is poured.'),
+      h('div.mood-input', {}, input, h('button.btn.primary', { onclick: () => ask() }, 'Match me')),
+      h('div.sugs', {}, moods.map((m) => h('button.chip', { onclick: () => ask(m) }, m))),
+      out,
+    ),
+    h('div.mood-right', {}, map, h('p.note', {}, `${COCKTAILS.length} drinks, each a point in mood space. Concept demo: a small hand-built embedding stands in for Exa’s.`)),
+  );
+  openModal({ title: 'The Nearest-Neighbour Bar', kicker: 'Bay Terrace · order by mood', body, wide: true, className: 'mood-modal' });
+  setTimeout(() => input.focus(), 50);
 };
 
 // ================================================================== Photo booth
